@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en-us">
+  <head>
+	<meta content='text/html; charset=UTF-8' http-equiv='Content-Type' />
+  	<meta name="twitter:card" content="player" />
+  	<meta name="twitter:title" content="Shapes">
+  	<meta name="twitter:description" content="Shapes" />
+  	<meta name="twitter:player" content="https://tano.xyz/shapes/index.html" />
+  	<meta name="twitter:player:width" content="480" />
+  	<meta name="twitter:player:height" content="480" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
+    <title>App</title>
+    <style>
+        body { margin: 0; background-color: black }
+        .game {
+            position: absolute;
+            top: 0px;
+            left: 0px;
+            margin: 0px;
+            border: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            display: block;
+        }
+    </style>
+  </head>
+  <body>
+    <canvas oncontextmenu="return false;" class="game" id="canvas"></canvas>
+	<script>
+		var Module = {};
+		
+		var WASM_MEMORY;
+		var HEAP8, HEAPU8, HEAP16, HEAPU16, HEAP32, HEAPU32, HEAPF32;
+		
+		var audio_node;
+		var audioCtx;
+		
+		// Heap access helpers.
+		function setHeap() {
+			var buf = WASM_MEMORY.buffer;
+			HEAP   = buf;
+			HEAP8 = new Int8Array(buf);
+			HEAP16 = new Int16Array(buf);
+			HEAP32 = new Int32Array(buf);
+			HEAPU8 = new Uint8Array(buf);
+			HEAPU16 = new Uint16Array(buf);
+			HEAPU32 = new Uint32Array(buf);
+			HEAPF32 = new Float32Array(buf);
+		}
+		
+		function checkHeap() {
+			if (HEAP.byteLength == 0) {
+				console.log("Heap has changed");
+				setHeap();
+			}
+		}
+		
+		
+		function Pointer_stringify(ptr, length) {
+			const buffer = new Uint8Array(Module.ASM.memory.buffer);
+			if (!length) {
+				length = 0;
+				while (buffer[ptr+length] != 0) length += 1;
+			}
+			return (new TextDecoder("utf-8")).decode(new Uint8Array(Module.ASM.memory.buffer, ptr, length));
+		}
+		
+		function stringToUTF8Array(str, cstr_ptr, maxBytesToWrite) {
+			const encoder = new TextEncoder;
+			var mem_u8 = new Uint8Array(Module.ASM.memory.buffer);
+			var stats = encoder.encodeInto(str, mem_u8.subarray(cstr_ptr, cstr_ptr+maxBytesToWrite-1));
+			mem_u8[cstr_ptr + stats.written] = 0;
+			return stats.written;
+		}
+		
+		
+		async function Launch_wasm(bin_path) {
+			const BINARY_PATH = bin_path;
+		
+		    var wasi_interface = {
+				proc_exit: function(code) {
+					if (code != 0) throw new Error('proc_exit(' + code + ')');
+				},
+				environ_sizes_get: function(environ_count_out_ptr, environ_buf_size_out_ptr) {
+				    throw new Error('Not implemented');
+				},
+				environ_get: function(environ_pointers_out, environ_out) {
+				    throw new Error('Not implemented');
+				},
+				args_sizes_get: function(args_count_out_ptr, args_buf_size_out_ptr) {
+				    return 0;
+				},
+				args_get: function(args_pointers_out, args_out) {
+				    return 0;
+				},
+				fd_pread: function(fd, iovs, iovs_len, offset, nread) {
+					return 8; // WASI_EBADF
+				},
+				fd_prestat_get: function(fd, prestat_ptr) {
+					return 8; // WASI_EBADF
+				},
+				fd_prestat_dir_name: function(fd, path_ptr, path_len) {
+					return 8; // WASI_EBADF
+				},
+				fd_fdstat_get: function(fd, fdstat_ptr) {
+					return 8; // WASI_EBADF
+				},
+				fd_fdstat_set_flags: function(fd, fdflags) {
+					return 8; // WASI_EBADF
+				},
+				fd_read: function(fd, iovs_ptr, iovs_len, nread) {
+					return 8; // WASI_EBADF
+				},
+				fd_write: function(fd, iov, iovcnt, pOutResult) { //only used to write to stdout
+					checkHeap();
+					var ret = 0, str = '';
+					if (iovcnt == 0) return 0;
+					for (var i = 0; i < iovcnt; i++) {
+						var ptr = HEAP32[(((iov)+(i*8))>>2)];
+						var len = HEAP32[(((iov)+(i*8 + 4))>>2)];
+						if (len < 0) return -1;
+						ret += len;
+						str += Pointer_stringify(ptr, len);
+					}
+					if      (fd == 1) {console.log(str);} // STDOUT
+					else if (fd == 2) {console.error(str);} // STDERR
+					else {console.log("[" + fd + "]: " + str);}
+					HEAPU32[pOutResult>>2] = ret;
+					return 0;
+				},
+				fd_close: function(fd) {
+					return 8; // WASI_EBADF
+				},
+				fd_seek: function(fd, offset, whence, newoffset_ptr) {
+					return 8; // WASI_EBADF
+				},
+				path_filestat_get: function(dirfd, lookupflags, path, path_len, buf) {
+					return 8; // WASI_EBADF
+				},
+				path_open: function(dirfd, dirflags, path, path_len, oflags, fs_rights_base, fs_rights_inheriting, fs_flags, fd_out) {
+					return 8; // WASI_EBADF
+				},
+				path_unlink_file: function(dirfd, path, path_len) {
+				    throw new Error('Not implemented');
+				},
+				path_remove_directory: function(dirfd, path, path_len) {
+				    throw new Error('Not implemented');
+				},
+				random_get: function(buf, buf_len) {
+				    throw new Error('Not implemented');
+				},
+				clock_res_get: function(a, b) {
+				    throw new Error('Not implemented');
+				},
+				clock_time_get: function(a, b, c) {
+				    throw new Error('Not implemented');
+				},
+				fd_advise: function(a, b, c, d) {
+				    throw new Error('Not implemented');
+				},
+				fd_allocate: function(a, b, c) {
+				    throw new Error('Not implemented');
+				},
+				fd_datasync: function(a) {
+				    throw new Error('Not implemented');
+				},
+				fd_filestat_get: function(a, b) {
+				    throw new Error('Not implemented');
+				},
+				fd_filestat_set_size: function(a, b) {
+				    throw new Error('Not implemented');
+				},
+				fd_filestat_set_times: function(a, b, c, d) {
+				    throw new Error('Not implemented');
+				},
+				fd_pwrite: function(a, b, c, d, e) {
+				    throw new Error('Not implemented');
+				},
+				fd_readdir: function(a, b, c, d, e) {
+				    throw new Error('Not implemented');
+				},
+				fd_renumber: function(a, b) {
+				    throw new Error('Not implemented');
+				},
+				fd_sync: function(a) {
+				    throw new Error('Not implemented');
+				},
+				fd_tell: function(a, b) {
+				    throw new Error('Not implemented');
+				},
+				path_create_directory: function(a, b, c) {
+				    throw new Error('Not implemented');
+				},
+				path_filestat_set_times: function(a, b, c, e, f, g, h) {
+				    throw new Error('Not implemented');
+				},
+				path_link: function(a, b, c, e, f, g, h) {
+				    throw new Error('Not implemented');
+				},
+				path_readlink: function(a, b, c, e, f, g) {
+				    throw new Error('Not implemented');
+				},
+				path_rename: function(a, b, c, e, f, g) {
+				    throw new Error('Not implemented');
+				},
+				path_symlink: function(a, b, c, e, f) {
+				    throw new Error('Not implemented');
+				},
+				poll_oneoff: function(a, b, c, e) {
+				    throw new Error('Not implemented');
+				},
+				proc_raise: function(a) {
+				    throw new Error('Not implemented');
+				},
+				sched_yield: function() {
+				    throw new Error('Not implemented');
+				},
+				sock_recv: function(a, b, c, d, e, f) {
+				    throw new Error('Not implemented');
+				},
+				sock_send: function(a, b, c, d, e) {
+				    throw new Error('Not implemented');
+				},
+				sock_shutdown: function(a, b) {
+				    throw new Error('Not implemented');
+				}
+		    };
+			
+		    let env = {
+				// Any non-wasi dependencies end up under 'env'.
+		        // TODO(sbc): Implement on the wasm side or add to WASI?
+		        _Unwind_RaiseException: function() {
+		            throw new Error('Not implemented');
+		        },
+				
+				// Function that starts the audio output
+				JS_start_audio: function(sample_rate, n_channels, n_frames, buffer_ptr) {
+					checkHeap();
+		
+					function findAlias(el, a, b, c) { return el[a+c] || el['moz'+b+c] || el['webkit'+b+c] || el['ms'+b+c]; }
+					try { audioCtx = new (findAlias(window,'','','AudioContext'))({
+						sampleRate: sample_rate,
+						latencyHint: 'interactive',
+					}); } catch (e) { }
+					if (!audioCtx) { console,log('Warning: WebAudio not supported'); return; }
+		
+		    		audio_node = audioCtx.createScriptProcessor(n_frames, 0, n_channels);
+		    		audio_node.onaudioprocess = function (event) {
+						checkHeap();
+		    		    var num_frames = event.outputBuffer.length;
+		    		    var num_channels = event.outputBuffer.numberOfChannels;
+						if (!Module.ASM.WAFN_audio_cb(num_frames, num_channels, buffer_ptr)) {
+							audio_node.disconnect();
+							return;
+						}
+						for (var chn = 0; chn < num_channels; chn++) {
+		    		        var chan = event.outputBuffer.getChannelData(chn);
+		    		        for (var i = 0; i < num_frames; i++) {
+		    		            chan[i] = HEAPF32[(buffer_ptr>>2) + ((num_channels*i)+chn)];
+		    		        }
+		    		    }
+		    		    
+		    		};
+		    		audio_node.connect(audioCtx.destination);
+		
+					// in some browsers, WebAudio needs to be activated on a user action
+					var resume_webaudio = function() {
+						if (audioCtx) {
+							if (audioCtx.state === 'suspended') {
+								audioCtx.resume();
+							}
+						}
+					};
+					document.addEventListener('click', resume_webaudio, {once:true});
+					document.addEventListener('touchstart', resume_webaudio, {once:true});
+					document.addEventListener('keydown', resume_webaudio, {once:true});
+				},
+		
+				JS_terminate_audio: function() {
+					if (audio_node) {
+						audio_node.disconnect();
+					}
+				},
+		
+		
+		    };
+		
+			// Fetch the .wasm file and store its bytes into the byte array wasm_bytes
+			const response = await fetch(BINARY_PATH);
+			var wasm_bytes = await response.arrayBuffer();
+			wasm_bytes     = new Uint8Array(wasm_bytes);
+		
+			var JS = {};
+		
+			// Starting from here, this code goes through the wasm file sections according the binary
+			// encoding description https://webassembly.org/docs/binary-encoding/ and
+			// https://github.com/WebAssembly/design/blob/main/BinaryEncoding.md
+			{
+				const UTF8_decoder = new TextDecoder("utf-8");
+				var cursor = 8;
+				const wasm_len = wasm_bytes.length;
+		
+				// The wasm binary format uses variable lenght numbers, encoded using LEB128
+				// https://en.wikipedia.org/wiki/LEB128 this function decodes de current chunk and
+				// displaces the cursor
+				function Get_next_ULEB128() {
+					var result = 0;
+					var shift = 0;
+					while (1) {
+						const value = wasm_bytes[cursor];
+						result |= ((value & 0x7F) << shift);
+						cursor += 1;
+						if ((value & 0x80) == 0) break;
+						shift += 7;
+					}
+					return result;
+				}
+		
+				while (cursor < wasm_len) {
+		
+					const section_type = Get_next_ULEB128();
+					const section_len  = Get_next_ULEB128();
+		
+					// We only care about the section 2 (Imports section)
+					if (section_type !== 2) {
+						cursor += section_len;
+						continue;
+					}
+		
+					const total_entries = Get_next_ULEB128();
+		
+					for (var i = 0; i < total_entries; i+=1) {
+		
+						// Get the module name
+						const module_str_len = Get_next_ULEB128();
+						const module_str     = UTF8_decoder.decode(new Uint8Array(wasm_bytes.buffer, cursor, module_str_len));
+						cursor += module_str_len;
+		
+						// Get the field
+						const field_str_len = Get_next_ULEB128();
+						const field_start   = cursor;
+						const field_str     = UTF8_decoder.decode(new Uint8Array(wasm_bytes.buffer, field_start, field_str_len));
+						cursor += field_str_len;
+		
+						// Get the kind of module
+						var kind = wasm_bytes[cursor];
+						cursor += 1;
+		
+						if (kind === 0) { // Function (we only care about the functions)
+							Get_next_ULEB128();
+							if (module_str === "JS") { // We only care about the JS modules
+								
+								// The code is embebed in the field in this format:
+								// my_function|(int arg1, int argc)|{ ...the code ...}
+								// So:
+								const splited_field = field_str.split('|', 2); // We extract the different parts
+								function_name = splited_field[0];
+								function_args = splited_field[1];
+								function_code = field_str.substr(function_name.length + function_args.length + 2);
+								
+								// strip C types out of params list (change '(float p1, unsigned int p2)' to 'p1,p2' (function pointers not supported)
+								function_args = function_args.replace(/\[.*?\]|^\(\s*(void|)\s*\)$/g, '').replace(/.*?(\w+)\s*[,\)]/g, ',$1').substr(1);
+				
+								// Patch the binary puting white spaces on the field string in order to have the clean function name
+								wasm_bytes.fill(32, field_start + function_name.length, field_start + field_str_len)
+								
+								// Append white spaces to the function name to get the same lenght as the full field string
+								function_name = function_name + (' '.repeat(field_str_len - function_name.length));
+							
+								// Instantiate the javascript function
+								JS[function_name] = new Function(...(function_args ? function_args.split(',') : []).concat(function_code));
+							}
+						}
+						// Handle all the other kinds
+						else if (kind === 1) { // Table
+							Get_next_ULEB128(); // element_type
+		
+							// Resizable limits
+							const flags = Get_next_ULEB128();
+							Get_next_ULEB128(); // initial lenght
+							if (flags === 1) {
+								Get_next_ULEB128(); // maximum
+							}
+						}
+						else if (kind === 2) { // Memory
+							// Resizable limits
+							const flags = Get_next_ULEB128();
+							Get_next_ULEB128(); // initial lenght
+							if (flags === 1) {
+								Get_next_ULEB128(); // maximum
+							}
+						}
+						else if (kind === 3) { // Global
+							Get_next_ULEB128(); // Value type
+							Get_next_ULEB128(); // Mutablility flag
+						}
+		
+					}
+				}
+			}
+			
+			// Instantiate the wasm module by passing the prepared env and JS objects containing import functions for the wasm module
+			var output = await WebAssembly.instantiate(wasm_bytes, {env:env, JS:JS, wasi_snapshot_preview1: wasi_interface});
+			Module.ASM = output.instance.exports;
+			WASM_MEMORY = Module.ASM.memory;
+		    setHeap();
+			if (Module.ASM._start) Module.ASM._start();
+			else if (Module.ASM.main) Module.ASM.main();
+		}
+		Launch_wasm("app.wasm");
+	</script>
+  </body>
+</html>
+
